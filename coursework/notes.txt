@@ -3,6 +3,8 @@ git commit -m "initial commit"
 git push origin main
 
 cd /home/user/SystemsProgramming
+wsl -u root
+ps -e
 
 code .
 
