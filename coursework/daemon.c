@@ -1,58 +1,60 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
-#include <fcntl.h>
 #include <sys/types.h>
-#include <sys/stat.h>
-#include <time.h>
+#include <sys/socket.h>
+#include <sys/un.h>
 #include <string.h>
-#include <syslog.h>
+#include <stdint.h>
+
+#define SOCKET_PATH "/tmp/daemon_socket"
 
 int main(void) {
-    pid_t pid, sid;
-    time_t timebuf;
+    int sockfd;
+    struct sockaddr_un addr;
+    char buf[1024];
 
-    //Fork child; will be actual daemon
-    pid = fork();
-
-    if (pid < 0) {
-        perror("fork");
+    // Create a Unix domain socket
+    if ((sockfd = socket(AF_UNIX, SOCK_STREAM, 0)) == -1) {
+        perror("socket");
         exit(EXIT_FAILURE);
     }
 
-    if (pid > 0) {
-        // In the parent, let's bail
-        printf("Finished\n");
-        exit(EXIT_SUCCESS);
-    }
+    memset(&addr, 0, sizeof(struct sockaddr_un));
+    addr.sun_family = AF_UNIX;
+    strncpy(addr.sun_path, SOCKET_PATH, sizeof(addr.sun_path) - 1);
 
-    //child:
-    //new session
-    if ((sid = setsid()) < 0) {
-        perror("setsid");
+    // Bind the socket to a local address
+    if (bind(sockfd, (struct sockaddr *)&addr, sizeof(struct sockaddr_un)) == -1) {
+        perror("bind");
+        close(sockfd);
         exit(EXIT_FAILURE);
     }
 
-    //reset file mode
-    umask(0);
+    // Listen for incoming connections
+    if (listen(sockfd, 5) == -1) {
+        perror("listen");
+        close(sockfd);
+        exit(EXIT_FAILURE);
+    }
 
-    //close stdin, stdout, stderr
-    close(STDIN_FILENO);
-    close(STDOUT_FILENO);
-    close(STDERR_FILENO);
+    // Accept incoming connections and handle them
+    while (1) {
+        int clientfd;
+        struct sockaddr_un client_addr;
+        socklen_t client_addr_len = sizeof(struct sockaddr_un);
 
-    //Set log mask to log all msgs
-    setlogmask(LOG_UPTO(LOG_INFO));
+        if ((clientfd = accept(sockfd, (struct sockaddr *)&client_addr, &client_addr_len)) == -1) {
+            perror("accept");
+            continue;
+        }
 
-    //Open sylog with custom identifier/options
-    openlog("CW2_DAEMON1", LOG_PID, LOG_DAEMON);
+        // Handle communication with the client here
 
-    // Log a message to syslog
-    syslog(LOG_INFO, "Daemon started");
-    syslog(LOG_INFO, "PID: %d", (int)pid);
+        close(clientfd);
+    }
 
-    closelog();
+    close(sockfd);
 
-    printf("finished");
     return 0;
 }

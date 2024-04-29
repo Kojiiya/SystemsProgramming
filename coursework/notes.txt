@@ -1,3 +1,4 @@
+git add --all
 git commit -m "initial commit"
 git push origin main
 
@@ -6,3 +7,5 @@ cd /home/user/SystemsProgramming
 code .
 
 cat /var/log/syslog
+
+https://education.github.com/git-cheat-sheet-education.pdf
