@@ -1,0 +1,143 @@
+
+COMP5012 Systems Programming Coursework 2
+
+This coursework relates to all learning outcomes on the module:
+
+    Have a thorough understanding of the principles and issues involved in systems programming and be able to extend and implement low level functionality.
+
+    Understand the issues involved in IPC at both local and network levels and be able to design and implement a multi-process communicating system.
+
+    Conduct a detailed analysis of an existing low-level system and give recommendations to improve resilience and reliance against malicious and accidental interference.
+
+    Produce solutions to systems level problems in a POSIX environment and be able to give recommendations of possible approaches for the other environments.
+
+You will also need to use skills from the following modules:
+
+    COMP5004: C programming.
+    COMP4003: The software engineering process.
+
+~~~~~~~~~~~~~~~Task~~~~~~~~~~~~~~~~
+
+This coursework involves software design and implementation of a piece of software at the systems level with appropriate considerations for design, robustness, and security.
+
+Your program must be implemented in C using POSIX standards. It is recommended that you write the program under MINIX 3, but you may use any version of UNIX provided that you use only POSIX standard calls in your program.
+
+You are required to design and implement a data-sharing system which will operate between processes on the same computer. Your system should have the following components:
+
+    a server/daemon program which runs in the background, storing and managing the shared data.
+    a C library (a combination of an .h and .c file offering functions which another program can call) that provides functions that communicate with the daemon.
+
+The communication with the daemon should be encapsulated entirely within the library. In other words, the program that uses the library should not have to do any communication with the daemon.
+
+You should additionally write at least two C programs that make use of the library, to demonstrate your system working.
+
+Your library should offer at least the following two functions:
+
+uint8_t sendNewBlock(char *ID, uint8_t *secret, uint32_t data_length, void *data);
+uint8_t getBlock(char *ID, uint8_t *secret, uint32_t buffer_size, void *buffer);
+
+WHere:
+
+    In both cases, ID is a string of the caller’s choice (which may contain non-standard characters);
+    In both cases, secret is a 16-byte array of unsigned bytes of the caller’s choice;
+    In sendNewBlock, data_length is the number of bytes in data, and data is a pointer to an arbitrary data structure in memory.
+    In getBlock, buffer_size is the number of bytes allocated to buffer, and buffer is a pointer to an allocated area of memory which is unoccupied or safe to be overwritten.
+
+The sendNewBlock function should:
+
+    establish an IPC connection to your daemon;
+    send an appropriate command to it;
+    send the data_length bytes starting at address data to it;
+    retrieve a response from the daemon, which will indicate if storing the data was successful;
+    return a value to the calling program reflecting the daemon’s response.
+
+When recieving the command above, the daemon should:
+
+    read the data_length bytes sent by the library;
+    check if a storage buffer with the ID ID already exists and send an error response if it does; otherwise
+    create a new storage buffer and store the ID, secret and the provided data in it.
+    send a response indicating that the data has been stored.
+
+The getBlock function should work in a similar fashion, but should have the daemon retrieve the data from the buffer with the ID ID and send it back to the library, which should load it into memory in the provided buffer. The secret specified in getBlock must match the secret set when the block was created (and stored alongside the buffer). If it does not match, an access denied error should be returned.
+
+In order to work as a data sharing system, the getBlock call that returns a block should be able to be in a completely different program that the one that sent the block with the sendNewBlock call. It should not need to be the same process, nor a subprocess. Only the ID and secret should be used to establish which block should be accessed, not the ID of the calling process.
+
+The functions should also be able to deal with the daemon not being running or another error occurring in IPC. If an operation does fail, the return value from your function should tell the calling program why.
+
+Once this is working, add the following functionality:
+
+Reading: The function above can read only an entire data block. Allow a process to read only a part of a stored data block.
+
+Writing: The function above fails if the data block already exists. Change this so that a process that provides a matching secret and ID for an existing block of data can update the data, or part of it.
+
+Once you have these working, you can expand to:
+
+Access Control: Allow a process to associate additional secrets with an existing storage buffer, which give different levels of permissions - such as read permission only. To add or change access, a process must use the secret with which the buffer was created. As above, the bytes of the new secret will be set by the program that sends the data, but your daemon must record its association with the storage buffer. Programs that read and write the buffer may now provide a secret that matches any of the secrets associated with the buffer, provided the secret gives sufficient permissions to perform the requested operation. A process with the creating secret should also be able to remove authorization from other secrets.
+
+Race Condition Prevention: The daemon should record the date and time when the data was last written or updated (including when it was created) and when each process last read the data. Add an additional function which allows a process with any valid ID and secret to find out if the data has been updated since that process read it - in other words, if its copy of the data is now out of date. In addition, a process that is potentiall holding out-of-date data should not be allowed to update or overwrite the data until it has read the most recent version.
+Example
+
+This example reflects how the system might work if all of the functionality above has been implemented.
+
+A process (A) might upload a block of data, giving it the ID SongData and the secret 2294ab2c19ab2df0e1dac4b12a0289e1 (this is not a string, but a hex representation of a byte sequence). It then associates the secret 12345678123456781234567812345678 with the storage buffer, giving read permission only.
+
+A different process B (not necessarily another thread or subprocess in program A) can then obtain the data by using the library to request the block with ID SongData and giving secret 12345678123456781234567812345678. (How process B obtained the secret is left outside the scope of your system.)
+
+Process A may also associate the secret e6caa3e5a7ebbeb93d4bbe763f47ea4a with the SongData block and give it permission to update the block. A third process, C, may then read the data using this secret, and update it. Once it has updated it, any attempt by any other program - including process A - to update the data again should be blocked until that process has read the data back and seen the changes. Process B, assuming that it only has the 12345678.. secret, cannot update the data but should have a way of finding out that the data has been updated.
+Clarifications and restrictions
+
+Processes do not have “accounts” with the daemon, and the daemon tracks the reading and writing behaviour of processes, not programs. A process is not required to use only one secret, nor to use the same secret every time it runs. A seperate process is always treated as a separate process by the daemon even if it is a second running instance of the same program.
+
+Your daemon should operate between processes on a single machine only, and use interprocess communication protocols. It should not use web or other WAN RPC protocols.
+
+Programs should not be able to access shared data blocks except by passing through your daemon. You may assume that the operating system’s security is adequate to prevent unauthorized processes reading from your daemon’s address space. If you store data blocks in files or other storage media, you must prevent them being accessed by unauthorized processes, via your code or otherwise. You may make use of the file system’s security features in order to do so.
+
+You must provide a daemon. While a subset of the above functionality can be provided using only a library, the full range of functionality cannot be provided and the system will be significantly more insecure. You will not be awarded marks for functionality provided without using a daemon.
+
+The system must be implemented in your own code. Delegating the functionality to another storage or data sharing service (that is already part of the OS or otherwise) will result in no marks. You will need to use the OS’s support for message passing to support communication with your daemon. You may use shared memory support to pass data back and forth between the library and daemon, but should not allow direct access to the live data block.
+
+The daemon must be able to run indefinitely without being restarted. This means that storage buffers must be removed from the daemon’s memory at some point, as otherwise memory will eventually run out. You must decide how your daemon will manage this.
+
+The design and implementation of your system should, as far as possible, eliminate or mitigate security threats including (but not limited to):
+
+    Another program masquerading as your daemon and being communicated with by your library.
+    An unauthorised program reading data stored within your daemon, from your daemon’s shared memory space or files it creates on disk;
+    A program “brute-forcing” a secret, constantly sending read or update commands again and again with different secrets in the hope of getting the correct secret by chance;
+    A program issuing a large number of requests at high speed as a denial-of-service attack on the daemon (beware that these may be requests that are otherwise legal, eg, to upload and then repeatedly read back a large block of data)
+    A program storing a large number of large blocks ,as a denial-of-service attack on system storage.
+    A program falsely reporting the size of a data block, secret, ID, or other communicated material; or wilfully creating format errors, such as by omitting the null terminator on a string.
+
+You may need to add additional functions to the specification above, or additional parameters or steps to the functions in order to avoid these threats.
+
+It should also have reasonable responses to the following edge cases:
+
+    A process issuing a request to your shared library when your daemon is not running.
+    A process issuing a request to create a storage buffer using an ID that is already in use.
+    A process issuing a request to read or update data with an ID that does not exist.
+    A process issuing a request to read or update data with an ID that does exist, and an incorrect secret.
+    A process issuing a request to read or update data with an ID that does exist; and a secret that, while associated with the block, does not grant the necessary permissions.
+    A process that has placed data into a storage buffer crashing while other processes still need the data.
+
+Marking scheme
+
+This exercise is worth 80% of the total marks for the module. It is primarily marked via a written report. Your report (excluding references) has to be less than 3000 words. Marks are not directly assigned to your program, but your report should include your source code as an appendix, which does not count towards the word count. It will be looked at to verify that statements made in your report are true and have been acted on or arrived at through experimentation. A written report without any working implemented code will score no marks, as it has no source of factual results to report on.
+
+Your report should include the following sections. The percentages below are percentages of this coursework, not the whole module (ie, they add up to 100%, not 80%):
+
+    Introduction and requirements analysis. Starting from the requirements above, add the details of what will be necessary to make the system workable [15%] and secure [15%}. This should include any adjustments necessary to secure the system against the attacks previously listed.
+
+    Design, analysis and implementation: describe how you implemented your answers to the questions in the previous section, including:
+        The architecture of your system (eg, the interprocess communication method used, the storage methods used, any internal threading) [10%]
+        The system design for the server, including its main components, how they are implemented, and any communication between them [15%]
+        The design of the API (that is, the interface offered to other programs by your library), describing the features offered and the documentation, and with consideration of the difficulty of porting to/from other shared data APIs [15%]
+
+    Testing:
+        The test plan for your system, including both intended use and edge cases, including attacks; and results of the testing and your responses. [20%]
+        Research an existing data-sharing service and compare it to yours in terms of functionality, robustness and security. What could you learn from it? How compatible is your service with its? [10%]
+
+Submit your report via Moodle by 5pm on the Friday of Week 12.
+Statements about your implementation that are not supported by your code will lose marks, however your code does not need to be perfect provided it is sufficient to show that the material in your report has been arrived at through your own technical experience.
+
+This is individual work and is subject to the University’s rules on plagiarism. This applies to both the report and the source code.
+
+No current generative AI is capable of producing a correct answer to this exercise, and AI generated answers will contain errors obvious to the assessor resulting in a failing mark or in the plagiarism process being invoked.
