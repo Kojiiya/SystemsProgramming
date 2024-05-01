@@ -5,6 +5,8 @@
 #include <stdint.h>
 #include <time.h>
 
+extern int sockfd;
+
 struct secretRecord {
     uint8_t secret[16];
     uint8_t permissions;
