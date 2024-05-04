@@ -1,0 +1,8 @@
+{
+    "files.associations": {
+        "wait.h": "c",
+        "daemon_lib.h": "c",
+        "string.h": "c",
+        "stdio.h": "c"
+    }
+}
