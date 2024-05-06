@@ -1,0 +1,818 @@
+[1mdiff --git a/coursework/a.out b/coursework/a.out[m
+[1mdeleted file mode 100755[m
+[1mindex e484087..0000000[m
+Binary files a/coursework/a.out and /dev/null differ
+[1mdiff --git a/coursework/daemon b/coursework/daemon[m
+[1mindex 9a460b3..8e90921 100755[m
+Binary files a/coursework/daemon and b/coursework/daemon differ
+[1mdiff --git a/coursework/daemon.c b/coursework/daemon.c[m
+[1mindex 660347a..9f224f8 100644[m
+[1m--- a/coursework/daemon.c[m
+[1m+++ b/coursework/daemon.c[m
+[36m@@ -4,149 +4,244 @@[m
+ #include <stdlib.h>[m
+ #include <unistd.h>[m
+ #include <sys/types.h>[m
+[31m-#include <sys/socket.h>[m
+[31m-#include <sys/un.h>[m
+[32m+[m[32m#include <sys/stat.h>[m
+[32m+[m[32m#include <fcntl.h>[m
+ #include <string.h>[m
+[32m+[m[32m#include <signal.h>[m
+[32m+[m[32m#include <sys/wait.h>[m
+ [m
+[31m-#define SOCKET_PATH "/tmp/daemon_socket"[m
+[31m-#define STORAGE_PATH "/tmp/daemon_storage"[m
+[32m+[m[32m#define FIFO_PATH "/tmp/daemon_fifo"[m
+ [m
+[31m-void handle_client(int client_socket);[m
+[32m+[m[32mstatic pid_t daemon_pid = -1;[m
+[32m+[m[32mstatic struct data_block *data_blocks = NULL;[m
+ [m
+[31m-int create_socket_file() {[m
+[31m-    // Remove any existing socket file[m
+[31m-    unlink(SOCKET_PATH);[m
+[31m-[m
+[31m-    // Create a new socket file[m
+[31m-    int fd = socket(AF_UNIX, SOCK_STREAM, 0);[m
+[31m-    if (fd == -1) {[m
+[31m-        perror("socket");[m
+[31m-        return -1;[m
+[31m-    }[m
+[32m+[m[32mstruct data_block *get_data_blocks() {[m
+[32m+[m[32m    return data_blocks;[m
+[32m+[m[32m}[m
+[32m+[m[32mvoid handle_client(int client_fd);[m
+[32m+[m[32mvoid cleanup_fifo_and_exit(int signum);[m
+[32m+[m[32mvoid store_data_block(const char *id, const uint8_t *secret, uint8_t permissions, uint32_t data_len, const void *data);[m
+ [m
+[31m-    // Set up the address structure[m
+[31m-    struct sockaddr_un addr;[m
+[31m-    memset(&addr, 0, sizeof(struct sockaddr_un));[m
+[31m-    addr.sun_family = AF_UNIX;[m
+[31m-    strncpy(addr.sun_path, SOCKET_PATH, sizeof(addr.sun_path) - 1);[m
+[32m+[m[32mint create_fifo() {[m
+[32m+[m[32m    // Remove any existing FIFO[m
+[32m+[m[32m    unlink(FIFO_PATH);[m
+ [m
+[31m-    // Bind the socket to the address[m
+[31m-    if (bind(fd, (struct sockaddr *)&addr, sizeof(struct sockaddr_un)) == -1) {[m
+[31m-        perror("bind");[m
+[31m-        close(fd);[m
+[32m+[m[32m    // Create a new FIFO[m
+[32m+[m[32m    if (mkfifo(FIFO_PATH, 0666) == -1) {[m
+[32m+[m[32m        perror("mkfifo");[m
+         return -1;[m
+     }[m
+ [m
+[31m-    return fd;[m
+[32m+[m[32m    return 0;[m
+ }[m
+ [m
+[31m-void listen_for_connections(int server_socket) {[m
+[31m-    while (1) {[m
+[31m-        int client_socket = accept(server_socket, NULL, NULL);[m
+[31m-        if (client_socket == -1) {[m
+[31m-            perror("Failed to accept connection");[m
+[31m-            continue;[m
+[32m+[m[32mvoid cleanup_fifo() {[m
+[32m+[m[32m    unlink(FIFO_PATH);[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32mvoid cleanup_fifo_and_exit(int signum) {[m
+[32m+[m[32m    printf("Received signal %d, cleaning up and exiting...\n", signum);[m
+[32m+[m[32m    cleanup_fifo();[m
+[32m+[m
+[32m+[m[32m    // Free the allocated memory[m
+[32m+[m[32m    struct data_block *current_block = data_blocks;[m
+[32m+[m[32m    while (current_block != NULL) {[m
+[32m+[m[32m        struct data_block *temp_block = current_block;[m
+[32m+[m[32m        current_block = current_block->next;[m
+[32m+[m
+[32m+[m[32m        struct secretRecord *current_secret = temp_block->secrets;[m
+[32m+[m[32m        while (current_secret != NULL) {[m
+[32m+[m[32m            struct secretRecord *temp_secret = current_secret;[m
+[32m+[m[32m            current_secret = current_secret->next;[m
+[32m+[m[32m            free(temp_secret);[m
+         }[m
+ [m
+[31m-        // Handle the client[m
+[31m-        handle_client(client_socket);[m
+[32m+[m[32m        free(temp_block->data);[m
+[32m+[m[32m        free(temp_block);[m
+     }[m
+[31m-}[m
+ [m
+[32m+[m[32m    exit(EXIT_SUCCESS);[m
+[32m+[m[32m}[m
+ [m
+[31m-void handle_client(int client_socket) {[m
+[32m+[m[32mvoid handle_client(int client_fd) {[m
+     char buffer[1024];[m
+[31m-    ssize_t num_bytes = read(client_socket, buffer, sizeof(buffer) - 1);[m
+[32m+[m[32m    ssize_t num_bytes = read(client_fd, buffer, sizeof(buffer) - 1);[m
+ [m
+     if (num_bytes == -1) {[m
+         perror("read");[m
+[31m-        close(client_socket);[m
+[31m-        return;[m
+[32m+[m[32m        close(client_fd);[m
+[32m+[m[32m        exit(EXIT_FAILURE);[m
+     } else if (num_bytes == 0) {[m
+[31m-        printf("Client disconnected.\n");[m
+[31m-        close(client_socket);[m
+[31m-        return;[m
+[32m+[m[32m        close(client_fd);[m
+[32m+[m[32m        exit(EXIT_SUCCESS);[m
+     }[m
+ [m
+     buffer[num_bytes] = '\0';[m
+[32m+[m[32m    printf("Received command from client: %s\n", buffer);[m
+[32m+[m
+[32m+[m[32m    // Parse the command[m
+[32m+[m[32m    char *token = strtok(buffer, ":");[m
+[32m+[m[32m    printf("Command: %s\n", token); // Print the command[m
+[32m+[m
+[32m+[m[32m    if (strcmp(token, "SEND_NEW_BLOCK") == 0) {[m
+[32m+[m[32m        char *id = strtok(NULL, ":");[m
+[32m+[m[32m        char *secret_str = strtok(NULL, ":");[m
+[32m+[m[32m        uint32_t data_len = atoi(strtok(NULL, ":"));[m
+[32m+[m[32m        char *data = strtok(NULL, ":");[m
+[32m+[m
+[32m+[m[32m        printf("ID: %s\n", id);[m
+[32m+[m[32m        printf("Secret: %s\n", secret_str);[m
+[32m+[m[32m        printf("Data Length: %u\n", data_len);[m
+[32m+[m[32m        printf("Data: %s\n", data);[m
+[32m+[m
+[32m+[m[32m        // Convert secret from hex string to uint8_t array[m
+[32m+[m[32m        uint8_t secret[16];[m
+[32m+[m[32m        for (int i = 0; i < 16; i++) {[m
+[32m+[m[32m            sscanf(secret_str + (i * 2), "%2hhx", &secret[i]);[m
+[32m+[m[32m        }[m
+ [m
+[31m-    char *command = strtok(buffer, ":");[m
+[31m-    char *data = strtok(NULL, ":");[m
+[32m+[m[32m        // Store the new data block[m
+[32m+[m[32m        store_data_block(id, secret, 0, data_len, data);[m
+ [m
+[31m-    if (command == NULL || data == NULL) {[m
+[31m-        printf("Received invalid command from client: %s\n", buffer);[m
+[31m-        close(client_socket);[m
+[31m-        return;[m
+[31m-    }[m
+[32m+[m[32m        // Send a response back to the client[m
+[32m+[m[32m        char response[] = "DATA_STORED";[m
+[32m+[m[32m        write(client_fd, response, sizeof(response));[m
+[32m+[m[32m    } else if (strcmp(token, "GET_BLOCK") == 0) {[m
+[32m+[m[32m        char *id = strtok(NULL, ":");[m
+[32m+[m[32m        char *secret_str = strtok(NULL, ":");[m
+ [m
+[32m+[m[32m        printf("ID: %s\n", id);[m
+[32m+[m[32m        printf("Secret: %s\n", secret_str);[m
+ [m
+[31m-    if (strcmp(command, "COMMAND") == 0) {[m
+[31m-        printf("Received COMMAND from client: %s\n", data);[m
+[31m-    } else if (strcmp(command, "SEND_NEW_BLOCK") == 0) {[m
+[31m-            printf("Received SEND_NEW_BLOCK from client: %s\n", data);[m
+[31m-[m
+[31m-            // Append the block data to the storage file[m
+[31m-            FILE *storage_file = fopen(STORAGE_PATH, "a");[m
+[31m-            if (storage_file == NULL) {[m
+[31m-                perror("Failed to open storage file");[m
+[32m+[m[32m        uint8_t secret[16];[m
+[32m+[m[32m        for (int i = 0; i < 16; i++) {[m
+[32m+[m[32m            sscanf(secret_str + (i * 2), "%2hhx", &secret[i]);[m
+[32m+[m[32m        }[m
+ [m
+[32m+[m[32m        struct data_block *current_block = data_blocks;[m
+[32m+[m[32m        while (current_block != NULL) {[m
+[32m+[m[32m            if (strcmp(current_block->id, id) == 0 && memcmp(current_block->secrets->secret, secret, 16) == 0) {[m
+[32m+[m[32m                // Open the FIFO for writing[m
+[32m+[m[32m                int client_fd_write = open(FIFO_PATH, O_WRONLY);[m
+[32m+[m[32m                if (client_fd_write == -1) {[m
+[32m+[m[32m                    perror("Failed to open FIFO for writing");[m
+[32m+[m[32m                    close(client_fd);[m
+[32m+[m[32m                    exit(EXIT_FAILURE);[m
+[32m+[m[32m                }[m
+[32m+[m
+[32m+[m[32m                // Construct the response header with the data length[m
+[32m+[m[32m                char response_header[64];[m
+[32m+[m[32m                sprintf(response_header, "DATA:%u:", current_block->data_len);[m
+[32m+[m[32m                if (write(client_fd_write, response_header, strlen(response_header)) == -1) {[m
+[32m+[m[32m                    perror("write");[m
+[32m+[m[32m                    close(client_fd);[m
+[32m+[m[32m                    close(client_fd_write);[m
+[32m+[m[32m                    exit(EXIT_FAILURE);[m
+[32m+[m[32m                }[m
+[32m+[m
+[32m+[m[32m                // Write the data block to the FIFO[m
+[32m+[m[32m                if (write(client_fd_write, current_block->data, current_block->data_len) == -1) {[m
+[32m+[m[32m                    perror("write");[m
+[32m+[m[32m                    close(client_fd);[m
+[32m+[m[32m                    close(client_fd_write);[m
+[32m+[m[32m                    exit(EXIT_FAILURE);[m
+[32m+[m[32m                }[m
+[32m+[m
+[32m+[m[32m                close(client_fd);[m
+[32m+[m[32m                close(client_fd_write);[m
+[32m+[m[32m                break;[m
+             }[m
+[32m+[m[32m            current_block = current_block->next;[m
+[32m+[m[32m        }[m
+ [m
+[31m-            // Assuming data is a string representation of the block[m
+[31m-            fprintf(storage_file, "%s\n", data);[m
+[31m-            fclose(storage_file);[m
+[31m-[m
+[31m-            const char *response = "Block received and stored successfully";[m
+[31m-            if (write(client_socket, response, strlen(response)) == -1) {[m
+[31m-                perror("write"); }[m
+[31m-    } else {[m
+[31m-        // Unknown command[m
+[31m-        printf("Received unknown command from client: %s\n", command);[m
+[31m-        const char *response = "Unknown command.";[m
+[31m-        if (write(client_socket, response, strlen(response)) == -1) {[m
+[31m-            perror("write");[m
+[32m+[m[32m        if (current_block == NULL) {[m
+[32m+[m[32m            printf("Data block not found\n");[m
+[32m+[m[32m            close(client_fd);[m
+         }[m
+[32m+[m[32m    } else {[m
+[32m+[m[32m        close(client_fd);[m
+     }[m
+ [m
+[31m-    close(client_socket);[m
+[32m+[m[32m    exit(EXIT_SUCCESS);[m
+ }[m
+ [m
+ [m
+ [m
+[32m+[m[32mvoid store_data_block(const char *id, const uint8_t *secret, uint8_t permissions, uint32_t data_len, const void *data) {[m
+[32m+[m[32m    struct data_block *new_block = malloc(sizeof(struct data_block));[m
+[32m+[m[32m    strncpy(new_block->id, id, sizeof(new_block->id));[m
+[32m+[m
+[32m+[m[32m    struct secretRecord *new_secret = malloc(sizeof(struct secretRecord));[m
+[32m+[m[32m    memcpy(new_secret->secret, secret, sizeof(new_secret->secret));[m
+[32m+[m[32m    new_secret->permissions = permissions;[m
+[32m+[m[32m    new_secret->next = NULL;[m
+[32m+[m
+[32m+[m[32m    new_block->secrets = new_secret;[m
+[32m+[m[32m    new_block->data_len = data_len;[m
+[32m+[m[32m    new_block->data = malloc(data_len);[m
+[32m+[m[32m    memcpy(new_block->data, data, data_len);[m
+[32m+[m[32m    new_block->last_update = time(NULL);[m
+[32m+[m[32m    new_block->next = NULL;[m
+[32m+[m
+[32m+[m[32m    // Add the new block to the linked list[m
+[32m+[m[32m    if (data_blocks == NULL) {[m
+[32m+[m[32m        data_blocks = new_block;[m
+[32m+[m[32m    } else {[m
+[32m+[m[32m        struct data_block *current = data_blocks;[m
+[32m+[m[32m        while (current->next != NULL) {[m
+[32m+[m[32m            current = current->next;[m
+[32m+[m[32m        }[m
+[32m+[m[32m        current->next = new_block;[m
+[32m+[m[32m    }[m
+[32m+[m[32m}[m
+[32m+[m
+ int main() {[m
+     initialize_daemon();[m
+ [m
+[31m-    // Create the socket file[m
+[31m-    int server_socket = create_socket_file();[m
+[31m-    if (server_socket == -1) {[m
+[31m-        perror("Failed to create socket file");[m
+[32m+[m[32m    // Create the FIFO[m
+[32m+[m[32m    if (create_fifo() == -1) {[m
+[32m+[m[32m        perror("Failed to create FIFO");[m
+         exit(EXIT_FAILURE);[m
+     }[m
+ [m
+[32m+[m[32m    daemon_pid = getpid();[m
+ [m
+[32m+[m[32m    signal(SIGINT, cleanup_fifo_and_exit);[m
+[32m+[m[32m    signal(SIGTERM, cleanup_fifo_and_exit);[m
+ [m
+     // Main loop to accept and handle connections[m
+     while (1) {[m
+[32m+[m[32m        printf("Daemon is listening for incoming connections...\n");[m
+[32m+[m[32m        int client_fd = open(FIFO_PATH, O_RDONLY);[m
+[32m+[m[32m        if (client_fd == -1) {[m
+[32m+[m[32m            perror("Failed to open FIFO");[m
+[32m+[m[32m            continue;[m
+[32m+[m[32m        }[m
+ [m
+[31m-                // Listen for incoming connections[m
+[31m-        if (listen(server_socket, 5) == -1) {[m
+[31m-            perror("Failed to listen on socket");[m
+[31m-            close(server_socket);[m
+[31m-            exit(EXIT_FAILURE);[m
+[32m+[m[32m        pid_t child_pid = fork();[m
+[32m+[m[32m        if (child_pid == -1) {[m
+[32m+[m[32m            perror("fork");[m
+[32m+[m[32m            close(client_fd);[m
+[32m+[m[32m            continue;[m
+[32m+[m[32m        } else if (child_pid == 0) {[m
+[32m+[m[32m            // Child process[m
+[32m+[m[32m            handle_client(client_fd);[m
+[32m+[m[32m            // Child process exits after handling the client[m
+[32m+[m[32m        } else {[m
+[32m+[m[32m            // Parent process[m
+[32m+[m[32m            close(client_fd);[m
+[32m+[m[32m            // Parent process continues to accept new connections[m
+         }[m
+ [m
+[31m-        printf("Daemon listening for incoming connections...\n");[m
+[31m-            int client_socket = accept(server_socket, NULL, NULL);[m
+[31m-            if (client_socket == -1) {[m
+[31m-                perror("Failed to accept connection");[m
+[31m-                continue;[m
+[31m-            }[m
+[32m+[m[32m        // Reap zombie child processes[m
+[32m+[m[32m        while (waitpid(-1, NULL, WNOHANG) > 0);[m
+[32m+[m[32m    }[m
+ [m
+[31m-            // Handle the client[m
+[31m-            handle_client(client_socket);[m
+[31m-        }[m
+[32m+[m[32m    // Cleanup the FIFO when the program exits[m
+[32m+[m[32m    cleanup_fifo();[m
+[32m+[m
+[32m+[m[32m    // Print "Daemon waiting for incoming connections..." once at the end[m
+[32m+[m[32m    printf("Daemon waiting for incoming connections...\n");[m
+ [m
+[31m-    // Cleanup the socket when the program exits[m
+[31m-    cleanup_socket();[m
+     return 0;[m
+ }[m
+\ No newline at end of file[m
+[1mdiff --git a/coursework/daemon_lib.c b/coursework/daemon_lib.c[m
+[1mindex ef87ccd..7afdf41 100644[m
+[1m--- a/coursework/daemon_lib.c[m
+[1m+++ b/coursework/daemon_lib.c[m
+[36m@@ -4,123 +4,169 @@[m
+ #include <stdlib.h>[m
+ #include <unistd.h>[m
+ #include <sys/types.h>[m
+[31m-#include <sys/socket.h>[m
+[31m-#include <sys/un.h>[m
+[32m+[m[32m#include <sys/stat.h>[m
+[32m+[m[32m#include <fcntl.h>[m
+ #include <string.h>[m
+[31m-#include <errno.h> [m
+[32m+[m[32m#include <errno.h>[m
+ [m
+[31m-#define SOCKET_PATH "/tmp/daemon_socket"[m
+[31m-#define STORAGE_FILE "/tmp/daemon_storage"[m
+[32m+[m[32m#define FIFO_PATH "/tmp/daemon_fifo"[m
+ [m
+[31m-int sockfd = -1;[m
+[32m+[m[32mint fifo_fd = -1;[m
+ [m
+ void initialize_daemon() {[m
+     printf("Daemon starting\n");[m
+[31m-    sockfd = -1;[m
+[31m-    //can open socket here[m
+[32m+[m[32m    fifo_fd = -1;[m
+ }[m
+ [m
+[31m-//socket cleanup[m
+[31m-void cleanup_socket() {[m
+[31m-    if (sockfd!= -1) {[m
+[31m-        close(sockfd);[m
+[31m-        sockfd = -1; //-1 indicates that the socket is closed[m
+[32m+[m[32muint8_t getBlock(char *ID, uint8_t *secret, uint32_t buffer_size, void *buffer) {[m
+[32m+[m[32m    // Construct command[m
+[32m+[m[32m    char command[1024];[m
+[32m+[m[32m    sprintf(command, "GET_BLOCK:%s:", ID);[m
+[32m+[m
+[32m+[m[32m    // Append secret to command[m
+[32m+[m[32m    char secret_str[33];[m
+[32m+[m[32m    for (int i = 0; i < 16; i++) {[m
+[32m+[m[32m        sprintf(secret_str + (i * 2), "%02x", secret[i]);[m
+[32m+[m[32m    }[m
+[32m+[m[32m    secret_str[32] = '\0';[m
+[32m+[m[32m    strcat(command, secret_str);[m
+[32m+[m[32m    strcat(command, ":");[m
+[32m+[m
+[32m+[m[32m    // Append buffer_size to command[m
+[32m+[m[32m    char buffer_size_str[11];[m
+[32m+[m[32m    sprintf(buffer_size_str, "%u", buffer_size);[m
+[32m+[m[32m    strcat(command, buffer_size_str);[m
+[32m+[m[32m    strcat(command, ":");[m
+[32m+[m
+[32m+[m[32m    // Send command to daemon[m
+[32m+[m[32m    if (send_command(command, &fifo_fd) == -1) {[m
+[32m+[m[32m        return -1; // Command send failure[m
+[32m+[m[32m    }[m
+[32m+[m
+[32m+[m[32m    // Read the response from the daemon[m
+[32m+[m[32m    char response[1024];[m
+[32m+[m[32m    ssize_t num_bytes = read(fifo_fd, response, sizeof(response) - 1);[m
+[32m+[m[32m    if (num_bytes == -1) {[m
+[32m+[m[32m        perror("read");[m
+[32m+[m[32m        close(fifo_fd);[m
+[32m+[m[32m        return -2; // Read failure[m
+[32m+[m[32m    } else if (num_bytes == 0) {[m
+[32m+[m[32m        printf("No response received from daemon\n");[m
+[32m+[m[32m        close(fifo_fd);[m
+[32m+[m[32m        return -3; // No response received[m
+[32m+[m[32m    }[m
+[32m+[m[32m    response[num_bytes] = '\0'; // Null-terminate the received response[m
+[32m+[m
+[32m+[m[32m    // Check if the response is the expected data[m
+[32m+[m[32m    if (strncmp(response, "DATA:", 5) == 0) {[m
+[32m+[m[32m        // Extract the data length from the response[m
+[32m+[m[32m        char data_len_str[64];[m
+[32m+[m[32m        strncpy(data_len_str, response + 5, sizeof(data_len_str) - 1);[m
+[32m+[m[32m        data_len_str[sizeof(data_len_str) - 1] = '\0'; // Ensure null-termination[m
+[32m+[m
+[32m+[m[32m        // Tokenize the copied string to extract the data length[m
+[32m+[m[32m        char *token = strtok(data_len_str, ":");[m
+[32m+[m[32m        uint32_t data_bytes = atoi(token); // Convert the data length string to an integer[m
+[32m+[m
+[32m+[m[32m        // Calculate the number of bytes to read, accounting for the length of the data length string and the delimiter[m
+[32m+[m[32m        size_t bytes_to_read = data_bytes - (strlen(token) + 1); // +1 for the delimiter[m
+[32m+[m
+[32m+[m[32m        // Read the actual data into the buffer[m
+[32m+[m[32m        ssize_t bytes_read = read(fifo_fd, buffer, bytes_to_read);[m
+[32m+[m[32m        if (bytes_read == -1) {[m
+[32m+[m[32m            perror("read");[m
+[32m+[m[32m            close(fifo_fd);[m
+[32m+[m[32m            return -5; // Read failure[m
+[32m+[m[32m        } else if (bytes_read == 0) {[m
+[32m+[m[32m            printf("No data received from daemon\n");[m
+[32m+[m[32m            close(fifo_fd);[m
+[32m+[m[32m            return -6; // No data received[m
+[32m+[m[32m        } else {[m
+[32m+[m[32m            printf("Received data from daemon: %.*s\n", (int)bytes_read, (char *)buffer);[m
+[32m+[m[32m            return bytes_read; // Success, return the actual data length received[m
+[32m+[m[32m        }[m
+[32m+[m[32m    } else {[m
+[32m+[m[32m        // The daemon sent an unexpected response[m
+[32m+[m[32m        printf("Unexpected response from daemon: %s\n", response);[m
+[32m+[m[32m        close(fifo_fd);[m
+[32m+[m[32m        return -7; // Unexpected response[m
+     }[m
+[31m-    unlink(SOCKET_PATH);[m
+ }[m
+ [m
+[31m-int send_command(const char *command) {[m
+[31m-    struct sockaddr_un addr;[m
+ [m
+[31m-    //Check if socket is already open[m
+[31m-    if (sockfd == -1) {[m
+[31m-        //Create socket if not[m
+[31m-        if ((sockfd = socket(AF_UNIX, SOCK_STREAM, 0)) == -1) {[m
+[31m-            perror("socket");[m
+[32m+[m[32mint send_command(const char *command, int *fifo_fd_ptr) {[m
+[32m+[m[32m    if (access(FIFO_PATH, F_OK) == -1) {[m
+[32m+[m[32m        if (mkfifo(FIFO_PATH, 0666) == -1) {[m
+[32m+[m[32m            perror("mkfifo");[m
+             return -1;[m
+         }[m
+[32m+[m[32m    }[m
+ [m
+[31m-        memset(&addr, 0, sizeof(struct sockaddr_un));[m
+[31m-        addr.sun_family = AF_UNIX;[m
+[31m-        strncpy(addr.sun_path, SOCKET_PATH, sizeof(addr.sun_path) - 1);[m
+[31m-[m
+[31m-        //Connect to daemon[m
+[31m-        if (connect(sockfd, (struct sockaddr *)&addr, sizeof(struct sockaddr_un)) == -1) {[m
+[31m-            perror("connect");[m
+[31m-            close(sockfd);[m
+[31m-            sockfd = -1;[m
+[32m+[m[32m    // Open FIFO for reading and writing[m
+[32m+[m[32m    if (*fifo_fd_ptr == -1) {[m
+[32m+[m[32m        *fifo_fd_ptr = open(FIFO_PATH, O_RDWR);[m
+[32m+[m[32m        if (*fifo_fd_ptr == -1) {[m
+[32m+[m[32m            perror("open");[m
+             return -1;[m
+         }[m
+     }[m
+ [m
+[31m-    //Send command to daemon[m
+[31m-    if (write(sockfd, command, strlen(command)) == -1) {[m
+[32m+[m[32m    ssize_t bytes_written = write(*fifo_fd_ptr, command, strlen(command));[m
+[32m+[m[32m    if (bytes_written == -1) {[m
+         perror("write");[m
+[31m-        close(sockfd);[m
+[31m-        sockfd = -1; [m
+[32m+[m[32m        close(*fifo_fd_ptr);[m
+[32m+[m[32m        *fifo_fd_ptr = -1;[m
+[32m+[m[32m        return -1;[m
+[32m+[m[32m    } else if (bytes_written != strlen(command)) {[m
+[32m+[m[32m        fprintf(stderr, "Incomplete write: %ld bytes written, %zu bytes expected\n", bytes_written, strlen(command));[m
+[32m+[m[32m        close(*fifo_fd_ptr);[m
+[32m+[m[32m        *fifo_fd_ptr = -1;[m
+         return -1;[m
+     }[m
+ [m
+[31m-    return 0;[m
+[31m-}[m
+[32m+[m[32m    printf("Command sent to daemon: %s\n", command);[m
+ [m
+[32m+[m[32m    return 0; // Success[m
+[32m+[m[32m}[m
+ [m
+ uint8_t sendNewBlock(char *ID, uint8_t *secret, uint32_t data_length, void *data) {[m
+[31m-    //Construct command[m
+[32m+[m[32m    // Construct command[m
+     char command[1024];[m
+[31m-    sprintf(command, "SEND_NEW_BLOCK:%s:%016lx:", ID, *(uint64_t *)secret);[m
+[32m+[m[32m    int command_len = snprintf(command, sizeof(command), "SEND_NEW_BLOCK:%s:", ID);[m
+ [m
+[31m-    //Send command to daemon[m
+[31m-    if (send_command(command) == -1) {[m
+[31m-        return -1; //Command send failure[m
+[32m+[m[32m    // Append secret to command[m
+[32m+[m[32m    char secret_str[33];[m
+[32m+[m[32m    for (int i = 0; i < 16; i++) {[m
+[32m+[m[32m        sprintf(secret_str + (i * 2), "%02x", secret[i]);[m
+     }[m
+[32m+[m[32m    secret_str[32] = '\0';[m
+[32m+[m[32m    command_len += snprintf(command + command_len, sizeof(command) - command_len, "%s:", secret_str);[m
+ [m
+[31m-    //Send data_length bytes of data[m
+[31m-    if (write(sockfd, data, data_length) == -1) {[m
+[31m-        perror("write");[m
+[31m-        close(sockfd);[m
+[31m-        return -2; //Data send failure[m
+[31m-    }[m
+[32m+[m[32m    // Append data_length to command[m
+[32m+[m[32m    command_len += snprintf(command + command_len, sizeof(command) - command_len, "%u:", data_length);[m
+ [m
+[31m-    //Assuming the daemon responds with a success message or an error message[m
+[31m-    char response[1024];[m
+[31m-    ssize_t num_bytes = read(sockfd, response, sizeof(response) - 1);[m
+[31m-    if (num_bytes == -1) {[m
+[31m-        perror("read");[m
+[31m-        close(sockfd);[m
+[31m-        return -3; // Read failure[m
+[31m-    } else if (num_bytes == 0) {[m
+[31m-        printf("No response received from daemon\n");[m
+[31m-        close(sockfd);[m
+[31m-        return -4; // No response received[m
+[31m-    } else {[m
+[31m-        response[num_bytes] = '\0'; //Null-terminate the received message[m
+[31m-        printf("Response from daemon: %s\n", response);[m
+[31m-        return 1; // Success[m
+[32m+[m[32m    // Ensure there's enough space for the data and null-termination[m
+[32m+[m[32m    if (data_length > sizeof(command) - command_len - 1) {[m
+[32m+[m[32m        fprintf(stderr, "Error: Data length exceeds command buffer size\n");[m
+[32m+[m[32m        return 1; // Command send failure[m
+     }[m
+[31m-}[m
+ [m
+[31m-// Function to get a data block from the daemon[m
+[31m-uint8_t getBlock(char *ID, uint8_t *secret, uint32_t buffer_size, void *buffer) {[m
+[31m-    // Construct command[m
+[31m-    char command[1024];[m
+[31m-    sprintf(command, "GET_BLOCK:%s:%d:", ID, buffer_size);[m
+[32m+[m[32m    // Directly copy data into command, ensuring it's null-terminated[m
+[32m+[m[32m    memcpy(command + command_len, data, data_length);[m
+[32m+[m[32m    command[command_len + data_length] = '\0'; // Null-terminate the command[m
+ [m
+     // Send command to daemon[m
+[31m-    if (send_command(command) == -1) {[m
+[31m-        return 0; // Failure[m
+[32m+[m[32m    if (send_command(command, &fifo_fd) == -1) {[m
+[32m+[m[32m        return 1; // Command send failure[m
+     }[m
+ [m
+[31m-    // Receive the data from the daemon[m
+[31m-    ssize_t num_bytes = read(sockfd, buffer, buffer_size);[m
+[31m-    if (num_bytes == -1) {[m
+[31m-        perror("read");[m
+[31m-        return 0; // Error reading data[m
+[31m-    } else if (num_bytes == 0) {[m
+[31m-        printf("No data received from daemon\n");[m
+[31m-        return 0; // No data received[m
+[31m-    } else {[m
+[31m-        printf("Data received from daemon: %.*s\n", (int)num_bytes, (char *)buffer);[m
+[31m-        return 1; // Success[m
+[31m-    }[m
+[31m-}[m
+\ No newline at end of file[m
+[32m+[m[32m    return 0; // Success[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m
+[32m+[m[32mvoid print_secret(uint8_t secret[], size_t size){[m
+[32m+[m[32m    for (int i = 0; i < size; i++) {[m
+[32m+[m[32m        printf("%02x", secret[i]);[m
+[32m+[m[32m    }[m[41m [m
+[32m+[m[32m    printf("\n");[m
+[32m+[m[32m}[m
+[1mdiff --git a/coursework/daemon_lib.h b/coursework/daemon_lib.h[m
+[1mindex 37f3079..2f80058 100644[m
+[1m--- a/coursework/daemon_lib.h[m
+[1m+++ b/coursework/daemon_lib.h[m
+[36m@@ -1,12 +1,12 @@[m
+[31m-//daemon_lib.h[m
+ #ifndef DAEMON_LIB_H[m
+ #define DAEMON_LIB_H[m
+ [m
+ #include <stdint.h>[m
+ #include <time.h>[m
+ [m
+[31m-extern int sockfd;[m
+[31m-[m
+[32m+[m[32mextern int fifo_fd;[m
+[32m+[m[32mstruct data_block *get_data_blocks();[m
+[32m+[m[32mvoid print_secret(uint8_t *secret, size_t size);[m
+ struct secretRecord {[m
+     uint8_t secret[16];[m
+     uint8_t permissions;[m
+[36m@@ -24,7 +24,7 @@[m [mstruct data_block {[m
+ [m
+ uint8_t sendNewBlock(char *ID, uint8_t *secret, uint32_t data_length, void *data);[m
+ uint8_t getBlock(char *ID, uint8_t *secret, uint32_t buffer_size, void *buffer);[m
+[31m-int send_command(const char *command);[m
+[32m+[m[32mint send_command(const char *command, int *fifo_fd_ptr);[m
+ void initialize_daemon();[m
+[31m-void cleanup_socket();[m
+[31m-#endif[m
+[32m+[m
+[32m+[m[32m#endif[m
+\ No newline at end of file[m
+[1mdiff --git a/coursework/test_recieve.c b/coursework/test_recieve.c[m
+[1mindex 200916d..79dcf49 100644[m
+[1m--- a/coursework/test_recieve.c[m
+[1m+++ b/coursework/test_recieve.c[m
+[36m@@ -1,46 +1,47 @@[m
+[32m+[m[32m// test_receive.c[m
+ #include "daemon_lib.h"[m
+ #include <stdio.h>[m
+[31m-#include <stdlib.h>[m
+ #include <string.h>[m
+[31m-#include <stdint.h>[m
+ [m
+ int main() {[m
+[31m-    //Define the secret key[m
+[31m-    uint8_t secret[16] = {0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10};[m
+[31m-[m
+[31m-    //Define expected data length [m
+[31m-    uint32_t data_length = 10; //Need to adjust/make dynamic/have daemon send length[m
+[31m-[m
+[31m-    //Allocate buffer to store retrieved data block[m
+[31m-    uint32_t buffer_size = 1024; //Adjust based on expected data size from daemon[m
+[31m-    char *buffer = malloc(buffer_size);[m
+[31m-    if (buffer == NULL || buffer_size == 0) {[m
+[31m-        perror("malloc");[m
+[31m-        cleanup_socket();[m
+[31m-        return 1;[m
+[31m-    }[m
+[31m-[m
+[31m-    //Retrieve data block from  daemon[m
+[31m-    if (getBlock("TestID123", secret, buffer_size, buffer) == -1) {[m
+[31m-        printf("Failed to retrieve data block from daemon\n");[m
+[31m-        free(buffer);[m
+[31m-        cleanup_socket();[m
+[31m-        return 1;[m
+[31m-    } else if (buffer_size < data_length) {[m
+[31m-        printf("Error: Buffer size is too small to hold the retrieved data block.\n");[m
+[31m-        free(buffer);[m
+[31m-        cleanup_socket();[m
+[31m-        return 1;[m
+[32m+[m[32m    char *ID = "testblock";[m
+[32m+[m[32m    uint8_t secret[] = {0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,[m
+[32m+[m[32m                        0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10};[m
+[32m+[m[32m    char buffer[1024];[m
+[32m+[m[32m    uint32_t buffer_size = sizeof(buffer);[m
+[32m+[m
+[32m+[m[32m    uint32_t result = getBlock(ID, secret, buffer_size, buffer);[m
+[32m+[m
+[32m+[m[32m    if (result >= 0) {[m
+[32m+[m[32m        printf("Data received from daemon: %.*s\n", result, buffer);[m
+[32m+[m[32m    } else {[m
+[32m+[m[32m        switch (result) {[m
+[32m+[m[32m            case -1:[m
+[32m+[m[32m                printf("Error: Failed to send command to daemon.\n");[m
+[32m+[m[32m                break;[m
+[32m+[m[32m            case -2:[m
+[32m+[m[32m                printf("Error: Failed to read response from daemon.\n");[m
+[32m+[m[32m                break;[m
+[32m+[m[32m            case -3:[m
+[32m+[m[32m                printf("Error: No response received from daemon.\n");[m
+[32m+[m[32m                break;[m
+[32m+[m[32m            case -4:[m
+[32m+[m[32m                printf("Error: Buffer too small\n");[m
+[32m+[m[32m                break;[m
+[32m+[m[32m            case -5:[m
+[32m+[m[32m                printf("Error: Failed to read data from daemon.\n");[m
+[32m+[m[32m                break;[m
+[32m+[m[32m            case -6:[m
+[32m+[m[32m                printf("Error: No data received from daemon.\n");[m
+[32m+[m[32m                break;[m
+[32m+[m[32m            case -7:[m
+[32m+[m[32m                printf("Error: Unexpected response received from daemon.\n");[m
+[32m+[m[32m                break;[m
+[32m+[m[32m            default:[m
+[32m+[m[32m                printf("Unknown error occurred: %d\n", result);[m
+[32m+[m[32m                break;[m
+[32m+[m[32m        }[m
+     }[m
+ [m
+[31m-[m
+[31m-    printf("Retrieved data block: %.*s\n", data_length, buffer);[m
+[31m-[m
+[31m-    //free allocation buffer[m
+[31m-    free(buffer);[m
+[31m-[m
+[31m-    //socket cleanup[m
+[31m-    cleanup_socket();[m
+[31m-[m
+     return 0;[m
+ }[m
+[1mdiff --git a/coursework/test_send b/coursework/test_send[m
+[1mindex 5fa3131..57a9390 100755[m
+Binary files a/coursework/test_send and b/coursework/test_send differ
+[1mdiff --git a/coursework/test_send.c b/coursework/test_send.c[m
+[1mindex a4908f1..30452c9 100644[m
+[1m--- a/coursework/test_send.c[m
+[1m+++ b/coursework/test_send.c[m
+[36m@@ -1,46 +1,42 @@[m
+[32m+[m[32m//test_send.c[m
+[32m+[m[32m#include "daemon_lib.h"[m
+ #include <stdio.h>[m
+[31m-#include <stdlib.h>[m
+ #include <string.h>[m
+[31m-#include <sys/types.h>[m
+[31m-#include <sys/socket.h>[m
+[31m-#include <sys/un.h>[m
+[31m-#include <unistd.h>[m
+[31m-[m
+[31m-#define SOCKET_PATH "/tmp/daemon_socket"[m
+ [m
+ int main() {[m
+[31m-    //socket creation[m
+[31m-    int sockfd = socket(AF_UNIX, SOCK_STREAM, 0);[m
+[31m-    if (sockfd == -1) {[m
+[31m-        perror("socket");[m
+[31m-        exit(EXIT_FAILURE);[m
+[31m-    }[m
+[31m-[m
+[31m-    //address structure setup[m
+[31m-    struct sockaddr_un addr;[m
+[31m-    memset(&addr, 0, sizeof(struct sockaddr_un));[m
+[31m-    addr.sun_family = AF_UNIX;[m
+[31m-    strncpy(addr.sun_path, SOCKET_PATH, sizeof(addr.sun_path) - 1);[m
+[31m-[m
+[31m-    //connect to daemon[m
+[31m-    if (connect(sockfd, (struct sockaddr *)&addr, sizeof(struct sockaddr_un)) == -1) {[m
+[31m-        perror("connect");[m
+[31m-        exit(EXIT_FAILURE);[m
+[31m-    }[m
+[31m-[m
+[31m-    printf("Connected to daemon.\n");[m
+[31m-[m
+[31m-    //send msg[m
+[31m-    const char *message = "Hello, World!";[m
+[31m-    if (write(sockfd, message, strlen(message)) == -1) {[m
+[31m-        perror("write");[m
+[31m-        exit(EXIT_FAILURE);[m
+[32m+[m[32m    char *ID = "testblock";[m
+[32m+[m[32m    uint8_t secret[] = {0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,[m
+[32m+[m[32m                        0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10};[m
+[32m+[m[32m    char *data = "This is a test data block.";[m
+[32m+[m[32m    uint32_t data_length = strlen(data);[m
+[32m+[m
+[32m+[m[32m    printf("Testing sendNewBlock function...\n");[m
+[32m+[m[32m    printf("ID: %s\n", ID);[m
+[32m+[m[32m    printf("Secret: ");[m
+[32m+[m[32m    print_secret(secret, sizeof(secret));[m
+[32m+[m[32m    printf("Data: %s\n", data);[m
+[32m+[m[32m    printf("Data Length: %u\n", data_length);[m
+[32m+[m
+[32m+[m[32m    uint8_t result = sendNewBlock(ID, secret, data_length, data);[m
+[32m+[m
+[32m+[m[32m    switch (result) {[m
+[32m+[m[32m        case 0:[m
+[32m+[m[32m            printf("Block sent and stored successfully.\n");[m
+[32m+[m[32m            break;[m
+[32m+[m[32m        case 1:[m
+[32m+[m[32m            printf("Failed to send command to daemon.\n");[m
+[32m+[m[32m            break;[m
+[32m+[m[32m        case 3:[m
+[32m+[m[32m            printf("Failed to read response from daemon.\n");[m
+[32m+[m[32m            break;[m
+[32m+[m[32m        case 4:[m
+[32m+[m[32m            printf("No response received from daemon.\n");[m
+[32m+[m[32m            break;[m
+[32m+[m[32m        case 5:[m
+[32m+[m[32m            printf("Error response received from daemon.\n");[m
+[32m+[m[32m            break;[m
+[32m+[m[32m        default:[m
+[32m+[m[32m            printf("Unknown error occurred.\n");[m
+     }[m
+[31m-[m
+[31m-    printf("Message sent to daemon.\n");[m
+[31m-[m
+[31m-    //close socket[m
+[31m-    close(sockfd);[m
+[31m-[m
+     return 0;[m
+[31m-}[m
+[32m+[m[32m}[m
+\ No newline at end of file[m
