@@ -11,3 +11,7 @@ code .
 cat /var/log/syslog
 
 https://education.github.com/git-cheat-sheet-education.pdf
+
+
+clang -o test_randSend daemon_lib.c test_randSend.c
+clang -o test_send daemon_lib.c test_send.c
