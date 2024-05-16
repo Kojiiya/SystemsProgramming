@@ -17,7 +17,8 @@ struct secretRecord {
 typedef struct {
     void *data;
     size_t size;
-    int data_shmid; 
+    int data_shmid;
+    uint8_t secret[16];
 } DynamicData;
 
 
@@ -33,7 +34,6 @@ struct data_block {
 
 uint8_t sendNewBlock(char *ID, uint8_t *secret, uint32_t data_length, void *data);
 uint8_t getBlock(char *ID, uint8_t *secret, uint32_t buffer_size, void *buffer);
-int send_command(const char *command, int *fifo_fd_ptr);
-void initialize_daemon();
+int send_command(const char *command);
 
 #endif
