@@ -32,30 +32,30 @@ uint8_t getBlock(char *ID, uint8_t *secret, uint32_t buffer_size, void *buffer) 
         sprintf(secret_str + (i * 2), "%02x", secret[i]); // Convert secret to hex string
     }
     secret_str[32] = '\0';
-    strcat(command, secret_str); // Append secret to command
+    strcat(command, secret_str); // Append secret to cmd
 
-    fifo_write_fd = open(FIFO_WRITE_PATH, O_WRONLY); // Open write FIFO
+    fifo_write_fd = open(FIFO_WRITE_PATH, O_WRONLY); 
     if (fifo_write_fd == -1) {
         perror("open");
         return -1;
     }
 
-    if (send_command(command) == -1) { // Send command to daemon
+    if (send_command(command) == -1) { 
         return -1;
     }
 
     close(fifo_write_fd);
 
-    fifo_read_fd = open(FIFO_READ_PATH, O_RDONLY); // Open read FIFO
+    fifo_read_fd = open(FIFO_READ_PATH, O_RDONLY); 
     if (fifo_read_fd == -1) {
         perror("open");
         return -1;
     }
 
     ssize_t num_bytes = 0;
-    char response[1024] = {0}; // Buffer for daemon response
+    char response[1024] = {0}; 
     while ((num_bytes = read(fifo_read_fd, response, sizeof(response) - 1)) > 0) {
-        response[num_bytes] = '\0'; // Null-terminate response
+        response[num_bytes] = '\0'; 
         printf("Received response from daemon: %s\n", response);
 
         if (strncmp(response, "DATA:", 5) == 0) {
@@ -64,27 +64,27 @@ uint8_t getBlock(char *ID, uint8_t *secret, uint32_t buffer_size, void *buffer) 
         } else if (strncmp(response, "ACCESS_DENIED", 14) == 0) {
             printf("Access Denied\n");
             close(fifo_read_fd);
-            break; // Access denied
+            break;
         } else {
             printf("Unexpected response from daemon: %s\n", response);
             close(fifo_read_fd);
             fifo_read_fd = -1;
-            return -7; // Unexpected response
+            return -7; 
         }
     }
 
     if (num_bytes == -1) {
         perror("read");
         close(fifo_read_fd);
-        return -2; // Read error
+        return -2; 
     } else if (num_bytes == 0) {
         printf("No response received from daemon\n");
         close(fifo_read_fd);
-        return -3; // No response
+        return -3; 
     }
 
     close(fifo_read_fd);
-    return -1; // Should not reach here
+    return -1;
 }
 
 /**
@@ -93,14 +93,14 @@ uint8_t getBlock(char *ID, uint8_t *secret, uint32_t buffer_size, void *buffer) 
  * @return Returns 0 on success, -1 on failure.
  */
 int send_command(const char *command) {
-    int fifo_write_fd = open(FIFO_WRITE_PATH, O_WRONLY); // Open write FIFO
+    int fifo_write_fd = open(FIFO_WRITE_PATH, O_WRONLY); 
     if (fifo_write_fd == -1) {
         perror("open");
         return -1;
     }
 
-    size_t command_len = strlen(command) + 1; // Length including null terminator
-    ssize_t bytes_written = write(fifo_write_fd, command, command_len); // Write command
+    size_t command_len = strlen(command) + 1; 
+    ssize_t bytes_written = write(fifo_write_fd, command, command_len); 
     if (bytes_written == -1) {
         perror("write");
         close(fifo_write_fd);
@@ -136,30 +136,30 @@ uint8_t sendNewBlock(char *ID, uint8_t *secret, uint32_t data_length, void *data
     secret_str[32] = '\0';
     command_len += snprintf(command + command_len, sizeof(command) - command_len, "%s:", secret_str); // Append secret
 
-    command_len += snprintf(command + command_len, sizeof(command) - command_len, "%u:", data_length); // Append data length
+    command_len += snprintf(command + command_len, sizeof(command) - command_len, "%u:", data_length); // Append data len
 
     if (data_length > sizeof(command) - command_len - 1) {
         fprintf(stderr, "Error: Data length exceeds command buffer size\n");
-        return 1; // Failure due to insufficient buffer size
+        return 1; // Insufficient buffer size
     }
 
-    memcpy(command + command_len, data, data_length); // Copy data into command
-    command[command_len + data_length] = '\0'; // Null-terminate command
+    memcpy(command + command_len, data, data_length); 
+    command[command_len + data_length] = '\0'; 
 
-    int fifo_write_fd = open(FIFO_WRITE_PATH, O_WRONLY); // Open write FIFO
+    int fifo_write_fd = open(FIFO_WRITE_PATH, O_WRONLY);
     if (fifo_write_fd == -1) {
         perror("open");
-        return 1; // Failure opening FIFO
+        return 1; 
     }
 
-    if (send_command(command) == -1) { // Send command to daemon
+    if (send_command(command) == -1) { 
         close(fifo_write_fd);
-        return 1; // Failure sending command
+        return 1; 
     }
 
     close(fifo_write_fd);
 
-    return 0; // Success
+    return 0; 
 }
 
 /**
@@ -169,7 +169,7 @@ uint8_t sendNewBlock(char *ID, uint8_t *secret, uint32_t data_length, void *data
  */
 void print_secret(uint8_t secret[], size_t size) {
     for (int i = 0; i < size; i++) {
-        printf("%02x", secret[i]); // Print each byte in hex
+        printf("%02x", secret[i]); // Print w/ hex conversion
     }
-    printf("\n"); // Newline at the end
+    printf("\n"); 
 }
