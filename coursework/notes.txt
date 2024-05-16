@@ -19,3 +19,42 @@ clang -o test_recieve daemon_lib.c test_recieve.c
 
 
 valgrind --leak-check=full --track-origins=yes ./daemon
+
+
+
+"To meet the requirements outlined for designing and implementing a data-sharing system using POSIX standards, particularly focusing on security and functionality, several key aspects need to be addressed. These include the architecture of the system, the server design, and the API design. Here's a breakdown of these components based on the provided requirements:
+System Architecture
+
+    Interprocess Communication (IPC): Given the requirement to use POSIX standards, Named Pipes (FIFOs) or Message Queues could be suitable for IPC. However, considering the simplicity and directness of communication needed, Named Pipes might be preferred for this scenario. They allow for bidirectional communication between processes, which fits the description of sending and receiving data blocks.
+
+    Storage Methods: Shared Memory is essential for storing and retrieving data blocks efficiently across processes. POSIX shared memory mechanisms (shm_open, mmap, etc.) facilitate this by allowing multiple processes to access the same memory segment simultaneously.
+
+    Threading: While not explicitly required, using threads internally within the daemon could enhance performance by allowing concurrent processing of multiple requests. However, care must be taken to manage thread safety, especially when accessing shared resources like the shared memory segments.
+
+Server Design
+
+    Main Components: The server (daemon) would primarily consist of a main loop that listens for incoming connections (via the FIFO), forks a child process to handle each connection, and manages shared memory segments for storing data blocks and tracking the number of blocks.
+
+    Communication Between Components: The daemon communicates with clients through the FIFO, exchanging commands and data. Internally, it uses shared memory segments to store and manage data blocks. Threading could be introduced to handle multiple client requests concurrently, with careful synchronization to avoid race conditions.
+
+API Design
+
+    Functionality Offered: The library should provide two core functions: sendNewBlock and getBlock. These functions abstract away the complexities of IPC and shared memory management, allowing client programs to interact with the daemon seamlessly.
+
+    Security Considerations: To ensure security, the library should validate inputs (e.g., checking the validity of IDs and secrets, ensuring proper allocation of buffers) and handle errors gracefully. Additionally, encryption could be considered for the secret strings passed between the client and the daemon to protect against unauthorized access.
+
+    Documentation: Comprehensive documentation is crucial for the API, detailing the purpose of each function, input parameters, return values, and potential error codes. This will aid in portability and ease of integration with other systems.
+
+    Portability: The design should aim for maximum compatibility with POSIX-compliant systems. Using standard IPC and shared memory mechanisms helps achieve this goal. However, thorough testing across different UNIX-like operating systems is essential to identify and resolve any platform-specific issues.
+
+Security Enhancements
+
+    Authentication and Authorization: Implementing a simple authentication mechanism where clients prove their identity before performing operations could enhance security. This could involve exchanging a challenge-response pair over a secure channel.
+
+    Encryption: Encrypting the data blocks and secrets in transit and at rest adds an extra layer of protection against interception and tampering.
+
+    Access Control: Limiting the operations available to authenticated users based on their roles or permissions can prevent unauthorized modifications or deletions.
+
+    Logging and Monitoring: Implement robust logging within the daemon to track all operations and anomalies. Regular monitoring of logs can help detect and respond to potential security breaches promptly.
+
+By addressing these key points, the proposed data-sharing system can be made functional, secure, and robust, meeting the requirements outlined in the task."
